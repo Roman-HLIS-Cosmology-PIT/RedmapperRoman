@@ -1,0 +1,3 @@
+#python desDepthGeneratePixelProcessJobArray.py -p /project/chto/chto/decade/DR3_combined_20250313/gal -o run.sh -f flux_bdf -e  fluxerr_bdf -b 'g,r,i,z'  -t bdf -g -G
+#python desDepthMakeDepthMap.py -d /home/chto/code/decade_redmapper/decade/coarse_depth.fits -p /home/chto/code/decade_redmapper/decade/SPMAPS_hp -t delve_dr311+dr312_%s_%s_Nov28th.fits -o /home/chto/code/decade_redmapper/decade//delve_dr311+dr312_ -b 'g,r,i,z' -n '1,1,1,1' -A '3.186,2.140,1.569,1.196' -s 'fwhm,airmass,exptime,skybrite' 
+python desDepthExpLimitCalc.py -d /home/chto/code/decade_redmapper/decade/coarse_depth.fits -b 'g,r,i,z' -n '5,5,5,5'   
