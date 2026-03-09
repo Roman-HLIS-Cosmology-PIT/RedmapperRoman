@@ -32,7 +32,8 @@ class BaseRunner:
                  survey  = 'roman',
                  refband = 'F184',
                  n_jobs = 32, nside_split = 32,
-                 Nrandoms = 1_000_000):
+                 Nrandoms = 1_000_000,
+                 z_range  = [0.1, 0.95]):
         
         """
         Initialize the Redmapper pipeline
@@ -104,6 +105,9 @@ class BaseRunner:
         Nrandoms : int, optional
             Number of random points to generate when constructing random catalogs
             for the cluster catalog. Default is 1,000,000.
+
+        z_range : list, optional
+            The minimum and maximum redshift to consider for the cluster candidate.
         """
         
         self.outBase    = outBase
@@ -116,6 +120,7 @@ class BaseRunner:
         self.n_jobs     = n_jobs
         self.survey     = survey
         self.Nrandoms   = Nrandoms
+        self.z_range    = z_range
         
 
         self.input_catalog_hdf5 = input_catalog_hdf5
@@ -601,7 +606,7 @@ class BaseRunner:
         refmag: {self.refband}
 
         # Redshift range [lo, hi]
-        zrange: [0.1, 0.95]
+        zrange: {self.z_range}
 
         # Spectroscopic input catalog
         specfile: {self.input_specz}
@@ -868,11 +873,6 @@ class BaseRunner:
     @timeit
     def run_zred_pixel(self, n_jobs = -1):
     
-        # config = redmapper.Configuration(os.path.dirname(self.outBase) + '_run/run_default.yml')
-        # zredRunpix = redmapper.ZredRunPixels(config)
-        # # This will use python multiprocessing to run on config.calib_nproc cores
-        # zredRunpix.run()
-
         dirname  = os.path.dirname(self.outBase)
         basename = os.path.basename(self.outBase)
         outpath  = f"{dirname}_run/zreds/{basename}_zreds_master_table.fit"
