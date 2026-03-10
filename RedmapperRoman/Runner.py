@@ -530,6 +530,7 @@ class BaseRunner:
         
         print(f"FINISHED CULLING. WE HAVE {len(use[QAcut])} MATCHES.")
 
+        plt.close()
         for i in range(len(self.bands) - 1):
             plt.hexbin(allspec['z'][use], (galmag[:, i] - galmag[:, i + 1])[use], extent=[0, 1, 0.0, 2.5], bins='log')
             plt.xlabel('z'); plt.ylabel(f'{self.bands[i]} - {self.bands[i + 1]}')
