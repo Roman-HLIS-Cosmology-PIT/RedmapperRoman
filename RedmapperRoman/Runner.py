@@ -6,7 +6,7 @@ from tqdm import tqdm
 from pkg_resources import resource_filename
 
 from . import utils
-import elidestools.elidestools as etools
+import elidestools as etools
 
 def timeit(func):
     def wrapper(*args, **kwargs):
