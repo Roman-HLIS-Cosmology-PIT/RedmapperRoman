@@ -13,9 +13,9 @@ This repo contains the relevant pipeline code for running Redmapper on any photo
 
 This repo is designed to contain all necessary pieces for running Redmapper. As a result it is not organized as a single python package, but inter-dependent pieces.
 
-1. Clone the repo locally `git clone https://github.com/Roman-HLIS-Cosmology-PIT/RedmapperRoman.git`.
-2. Next we will install `elidestools` as a standalone package. `cd RedmapperRoman/elidestools; python setup.py install`. This will install the package into your environment.
-3. Clone Dhayaa's modified version of redmapper `git clone https://github.com/DhayaaAnbajagane/redmapper.git` and install it as `cd redmapper; pip install .`. The setup.py approach won't work here (even though the file exists)
+1. Clone Dhayaa's modified version of redmapper `git clone https://github.com/DhayaaAnbajagane/redmapper.git` and install it as `cd redmapper; pip install .`. The setup.py approach won't work here (even though the file exists)
+2. Clone this repo locally `git clone https://github.com/Roman-HLIS-Cosmology-PIT/RedmapperRoman.git`.
+3. Next we will install `elidestools` as a standalone package. `cd RedmapperRoman/elidestools; python setup.py install`. This will install the package into your environment.
 
 That is everything you need to install! The rest of the code can be run by simple imports of the relevant functions/classes. I run this by calling the module from the cmdline. So as `PYTHONPATH={PATH_TO_RedmapperRoman repo} python -u -m RedmapperRoman.Runner.py {FLAGS}`. Running it in module mode helps with consistent importing of other modules (which are defined as relative imports).
 
