@@ -1,5 +1,5 @@
 import redmapper
-import numpy as np, matplotlib.pyplot as plt, pandas as pd
+import numpy as np, matplotlib.pyplot as plt
 import healsparse as hsp, fitsio, h5py, healpy as hp
 import os, re, time, glob, joblib, textwrap, shutil, yaml, pathlib
 from tqdm import tqdm
@@ -931,7 +931,6 @@ class BaseRunner:
         pixlist  = [p for p in pixlist if p in hpixlist]
         
 
-        np.save(f'/scratch/midway3/dhayaa/hpix{self.nside_split}.npy', np.array(pixlist))
         if n_jobs == -1: n_jobs = np.min([os.cpu_count(), len(filelist)])
 
         print(f"RUNNING {len(pixlist)} PIXELS (OUT OF POSSIBLE {len(filelist)}) USING {n_jobs} JOBS", flush = True)
