@@ -8,6 +8,9 @@ from pkg_resources import resource_filename
 from . import utils
 import elidestools as etools
 
+rm_version = redmapper.__version__
+
+
 def timeit(func):
     def wrapper(*args, **kwargs):
         start_time = time.time()
@@ -953,7 +956,7 @@ class BaseRunner:
     @timeit
     def consolidate_redmapper_pixel(self):
 
-        if os.path.isfile(os.path.dirname(self.outBase) + "/my_roman_run_redmapper_v0.8.7_lgt05_vl02_catalog.fit"):
+        if os.path.isfile(os.path.dirname(self.outBase) + f"/my_roman_run_redmapper_v{rm_version}_lgt05_vl02_catalog.fit"):
             print("FILE EXISTS. SKIPPING.....")
             return None
         
@@ -975,7 +978,7 @@ class BaseRunner:
     @timeit
     def setup_random_run(self, config_path):
 
-        if os.path.isfile(os.path.dirname(self.outBase) + "/zmask02/my_roman_run_redmapper_v0.8.7_vl02_vlim_zmask.fit"):
+        if os.path.isfile(os.path.dirname(self.outBase) + f"/zmask02/my_roman_run_redmapper_{rm_version}_vl02_vlim_zmask.fit"):
             print("FILES EXIST. SKIPPING....")
             return None
         
@@ -988,14 +991,14 @@ class BaseRunner:
         #Rewrite lines in config
         path = pathlib.Path(rand_config)
         data = yaml.safe_load(path.read_text())
-        data["catfile"]  = os.path.dirname(self.outBase) + "/my_roman_run_redmapper_v0.8.7_lgt05_vl02_catalog.fit"
+        data["catfile"]  = os.path.dirname(self.outBase) + f"/my_roman_run_redmapper_v{rm_version}_lgt05_vl02_catalog.fit"
         data["randfile"] = os.path.dirname(self.outBase) + "/zmask02/my_roman_randoms_master_table.fit"
         path.write_text(yaml.safe_dump(data, sort_keys=False))
 
         config = redmapper.Configuration(rand_config)
 
         #Move zmask file over
-        shutil.copy(os.path.dirname(self.outBase) + "/my_roman_run_redmapper_v0.8.7_vl02_vlim_zmask.fit", 
+        shutil.copy(os.path.dirname(self.outBase) + f"/my_roman_run_redmapper_v{rm_version}_vl02_vlim_zmask.fit", 
                     os.path.dirname(self.outBase) + "/zmask02/")
 
 
@@ -1026,7 +1029,7 @@ class BaseRunner:
         jobs = [joblib.delayed(self._single_step_run_zmask_pixel)(p, config) for p in pixlist]
         out  = joblib.Parallel(n_jobs = n_jobs, verbose = 10)(jobs)
 
-        if os.path.isfile(os.path.dirname(self.outBase) + '/my_roman_run_redmapper_v0.8.7_randoms_zmask_catalog.fit'):
+        if os.path.isfile(os.path.dirname(self.outBase) + f'/my_roman_run_redmapper_v{rm_version}_randoms_zmask_catalog.fit'):
             print("Consolidated file exists. Skipping.....")
             return None
 
@@ -1046,11 +1049,11 @@ class BaseRunner:
     @timeit
     def weight_randoms(self, config):
 
-        if os.path.isfile(os.path.dirname(self.outBase) + '/my_roman_run_redmapper_v0.8.7_weighted_randoms_z010-095_lgt020_vl02_area.fit'):
+        if os.path.isfile(os.path.dirname(self.outBase) + f'/my_roman_run_redmapper_v{rm_version}_weighted_randoms_z010-095_lgt020_vl02_area.fit'):
             print("FILES EXIST. SKIPPING...")
             return None
         
-        randfile = os.path.dirname(self.outBase) + '/my_roman_run_redmapper_v0.8.7_randoms_zmask_catalog.fit'
+        randfile = os.path.dirname(self.outBase) + f'/my_roman_run_redmapper_v{rm_version}_randoms_zmask_catalog.fit'
 
         config   = redmapper.Configuration(config)
         weigher  = redmapper.RandomWeigher(config, randfile)
@@ -1085,7 +1088,7 @@ class BaseRunner:
         path = pathlib.Path(rmgc_config)
         data = yaml.safe_load(path.read_text())
         data["outpath"]  = os.path.dirname(self.outBase) + "/redmagic/"
-        data["catfile"]  = os.path.dirname(self.outBase) + "/my_roman_run_redmapper_v0.8.7_lgt20_vl02_catalog.fit"
+        data["catfile"]  = os.path.dirname(self.outBase) + f"/my_roman_run_redmapper_v{rm_version}_lgt20_vl02_catalog.fit"
         data["redmagic_constchis"]    = [8.0, 8.0]
         data["redmagic_use_constchi"] = True
         data["redmagic_etas"]   = [0.5, 1.0]
