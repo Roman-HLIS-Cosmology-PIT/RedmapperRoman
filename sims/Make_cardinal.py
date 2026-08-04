@@ -114,7 +114,7 @@ INPUT = np.ones(12 * 4096**2)
 for b in bands:
     for m in maps:
         path = "/project/chihway/dhayaa/Roman/Cardinal/MockRun/SPmaps/MAP_%s_%s.hpy" % (b, m)
-        hp.write_map(path, INPUT)
+        hp.write_map(path, INPUT, overwrite = True)
         
         print("WRITTEN", b, m)
 
@@ -149,11 +149,11 @@ FilterZ      = np.logical_and(0.0 <= z, z <= zmax)
 FilterAll    = np.logical_and(FilterRegion, FilterZ)
 
 # Randomly select 2000 galaxies
-redshiftbin=np.arange(0.0, zmax, 0.01)
+redshiftbin=np.arange(0.0, zmax, 0.1)
 RandomSample = []
 nsample=500
 for zmin, zmax in zip(redshiftbin[:-1], redshiftbin[1:]):
-    mask = np.where(z[FilterAll])[0]
+    mask = np.where((z[FilterAll] > zmin) & (z[FilterAll] < zmax))[0]
     np.random.shuffle(mask)
     RandomSample.append(mask[:nsample])
 RandomSample = np.hstack(RandomSample)
