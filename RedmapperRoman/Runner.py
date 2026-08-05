@@ -39,7 +39,8 @@ class BaseRunner:
                  z_range  = [0.1, 0.95],
                  color_presel_thresh = [0.2]*9,
                  config_override = None,
-                 zeropoint = 22.5):
+                 zeropoint = 22.5,
+                 calib_frac = 0.5):
         
         """
         Initialize the Redmapper pipeline
@@ -130,6 +131,10 @@ class BaseRunner:
         zeropoint: float, optional
             The zeropoint of the fluxes in the flux-2-mag conversion. Defaults to 22.5
             based on Chun-Hao To's definitions for Roman.
+
+        calib_frac: float, option
+            What fraction of the area to be used for calibrating the cluster finder
+            and red-sequence finder. Default is 0.5 (i.e., half the data)
         """
         
         self.outBase    = outBase
@@ -143,6 +148,7 @@ class BaseRunner:
         self.survey     = survey
         self.Nrandoms   = Nrandoms
         self.z_range    = z_range
+        self.calib_frac = calib_frac
         
 
         self.input_catalog_hdf5   = input_catalog_hdf5
@@ -588,7 +594,7 @@ class BaseRunner:
         hpix_choice = [int(h[-10:-5]) for h in hpix_choice]
         hpix_choice = [h for h in hpix_choice if h in hpix_specz]
         np.random.default_rng(seed = self.seed).shuffle(hpix_choice)
-        hpix_choice = hpix_choice[:int(len(hpix_choice) * 0.5)] #Use half of sample to calibrate
+        hpix_choice = hpix_choice[:int(len(hpix_choice) * self.calib_frac)] #Use half of sample to calibrate
 
         return hpix_choice
     
@@ -1302,6 +1308,7 @@ if __name__ == '__main__':
     parser.add_argument("--color_presel_thresh",action='store', type=str, default = '0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2')
     parser.add_argument("--z_range",            action='store', type=str, default = '0.1,0.95')
     parser.add_argument("--zeropoint",          action='store', type=str, default = '22.5')
+    parser.add_argument("--calib_frac",         action='store', type=str, default = '0.5')
 
 
     args = vars(parser.parse_args())
@@ -1319,6 +1326,7 @@ if __name__ == '__main__':
            survey     = args['survey'],
            z_range    = [float(z) for z in args['z_range'].split(',')],
            zeropoint  = float(args['zeropoint']),
+           calib_frac = float(args['calib_frac']),
            
            input_catalog_hdf5 = args['input_catalog_hdf5'],
            input_specz        = args['input_specz'],

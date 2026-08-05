@@ -74,6 +74,10 @@ The job broadly takes me about 24 hours on a 28 processes, for the Cardinal run.
 
 `config_override` : Path to a yaml file that contains the parameter values you want to override (relative to the defaults). This file should have the same structure as the redmapper configs from Eli: https://github.com/DhayaaAnbajagane/redmapper/blob/main/how-to/cal_example.yml. We use the params in your override file, look for the params in the run's config and override them. So naming consistency is critical.
 
+`zeropoint` : The zeropoint of the fluxes in the flux-2-mag conversion. Defaults to 22.5 based on Chun-Hao To's definitions for Roman.
+
+`calib_frac` : What fraction of the area to be used for calibrating the cluster finder and red-sequence finder. Default is 0.5 (i.e., half the data). Set to higher values if your survey is very small.
+
 
 ## Python runner arguments
 
