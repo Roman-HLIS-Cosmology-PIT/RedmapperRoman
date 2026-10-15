@@ -133,18 +133,32 @@ def expLimit(depthFile, bands, npixMax, minNGal=50, pivot=23.0):
         use,=np.where((dep['LIMMAG'][gd,i] > fitRange[0]) &
                       (dep['LIMMAG'][gd,i] < fitRange[1]))
 
+        # Fallback for (near-)uniform depth, e.g. mocks whose errors are a deterministic
+        # function of flux: no LIMMAG lever arm, so use a constant exposure time.
+        constFit = np.array([0.0, np.median(np.log(dep['EXPTIME'][gd,i]))])
 
-        binStruct = dataBinner(dep['LIMMAG'][gd[use],i],
-                               np.log(dep['EXPTIME'][gd[use],i]),
-                               (fitRange[1]-fitRange[0])/11.,fitRange)
-        ok,=np.where(binStruct['Y_ERR'] > 0.0)
-        binStruct=binStruct[ok]
+        if (fitRange[1] - fitRange[0]) < 0.05 or use.size < 10:
+            print("Band %s: LIMMAG range %.4f too small; using constant exptime %.4g" %
+                  (b, fitRange[1] - fitRange[0], np.exp(constFit[1])))
+            binStruct = np.zeros(0, dtype=[('X','f4'),('Y','f4'),('X_ERR','f4'),('Y_ERR','f4')])
+            fit = constFit
+        else:
+            binStruct = dataBinner(dep['LIMMAG'][gd[use],i],
+                                   np.log(dep['EXPTIME'][gd[use],i]),
+                                   (fitRange[1]-fitRange[0])/11.,fitRange)
+            ok,=np.where(binStruct['Y_ERR'] > 0.0)
+            binStruct=binStruct[ok]
 
-        fit,cov = np.polyfit(binStruct['X_BIN']-pivot,
-                             binStruct['Y'],
-                             1.0,
-                             w=(1./binStruct['Y_ERR'])**2.,
-                             cov=True)
+            try:
+                fit,cov = np.polyfit(binStruct['X_BIN']-pivot,
+                                     binStruct['Y'],
+                                     1.0,
+                                     w=(1./binStruct['Y_ERR'])**2.,
+                                     cov=True)
+            except (np.linalg.LinAlgError, ValueError, TypeError) as e:
+                print("Band %s: exptime fit failed (%s); using constant exptime %.4g" %
+                      (b, e, np.exp(constFit[1])))
+                fit = constFit
 
         f=plt.figure(1)
         f.clf()
