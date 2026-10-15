@@ -38,6 +38,7 @@ class BaseRunner:
                  Nrandoms = 1_000_000,
                  z_range  = [0.1, 0.95],
                  color_presel_thresh = [0.2]*9,
+                 color_presel_maxerr = None,
                  config_override = None,
                  zeropoint = 22.5,
                  calib_frac = 0.5):
@@ -135,6 +136,12 @@ class BaseRunner:
         calib_frac: float, option
             What fraction of the area to be used for calibrating the cluster finder
             and red-sequence finder. Default is 0.5 (i.e., half the data)
+
+        color_presel_maxerr: float, optional
+            If set, a color is only used in the spec-z red-sequence preselection when
+            both of its bands have mag_err below this value, and each galaxy needs at
+            least one such color. Default None applies every color cut to every galaxy,
+            which removes all high-z spec-zs when shallow blue bands are included.
         """
         
         self.outBase    = outBase
@@ -159,6 +166,7 @@ class BaseRunner:
         self.SPmap_names          = SPmap_names
         self.nside_split          = nside_split
         self.color_presel_thresh  = color_presel_thresh
+        self.color_presel_maxerr  = color_presel_maxerr
         self.config_override      = config_override
         self.zp                   = zeropoint
 
@@ -548,6 +556,7 @@ class BaseRunner:
 
         allspec = allspec[id1]
         galmag  = galaxy.mag[id2]
+        galerr  = galaxy.mag_err[id2]
 
         print(f"FINISHED MATCHING. FOUND {len(allspec)} MATCHES.")
 
@@ -557,13 +566,20 @@ class BaseRunner:
         assert np.all(np.diff(np.array(self.bands_inds)) == 1), \
             "Input bands are offset by more than 1 filter. You need to use a new file for this analysis....Ping Dhayaa"
 
-        QAcut  = True
+        QAcut  = np.ones(use.size, dtype = bool)
+        nused  = np.zeros(use.size, dtype = int)
         for i in range(len(self.bands) - 1):
             THRESH= self.color_presel_thresh[i]
-            data  = galmag[:, i] - galmag[:, i + 1]
+            data  = galmag[use, i] - galmag[use, i + 1]
             model = np.interp(allspec['z'][use], MODEL['Z'], MODEL['COLOR'][:, self.bands_inds[i]])
-            QAcut = QAcut & (np.abs(model - data) <= THRESH)
-        
+            if self.color_presel_maxerr is None:
+                good = np.ones(use.size, dtype = bool)
+            else:
+                good = (galerr[use, i] < self.color_presel_maxerr) & (galerr[use, i + 1] < self.color_presel_maxerr)
+            QAcut = QAcut & (~good | (np.abs(model - data) <= THRESH))
+            nused = nused + good
+        QAcut = QAcut & (nused >= 1)
+
         print(f"FINISHED CULLING. WE HAVE {len(use[QAcut])} MATCHES.")
 
         plt.close()
@@ -1307,6 +1323,7 @@ if __name__ == '__main__':
     parser.add_argument("--bands_inds",         action='store', type=str, default = "0,1,2,3,4,5,6,7,8,9")
     parser.add_argument("--refband",            action='store', type=str, default = 'F184')
     parser.add_argument("--color_presel_thresh",action='store', type=str, default = '0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2')
+    parser.add_argument("--color_presel_maxerr",action='store', type=float, default = None)
     parser.add_argument("--z_range",            action='store', type=str, default = '0.1,0.95')
     parser.add_argument("--zeropoint",          action='store', type=str, default = '22.5')
     parser.add_argument("--calib_frac",         action='store', type=str, default = '0.5')
@@ -1340,5 +1357,6 @@ if __name__ == '__main__':
            n_jobs     = args['n_jobs'],
            seed       = args['seed'],
 
-           color_presel_thresh = [float(c) for c in args['color_presel_thresh'].split(',')]
+           color_presel_thresh = [float(c) for c in args['color_presel_thresh'].split(',')],
+           color_presel_maxerr = args['color_presel_maxerr'],
            ).go()
