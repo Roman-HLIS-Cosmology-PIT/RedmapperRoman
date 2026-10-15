@@ -1183,7 +1183,8 @@ class BaseRunner:
     def weight_randoms(self, config):
 
         obase = self._get_outbase_name()
-        if os.path.isfile(os.path.dirname(self.outBase) + f'/{obase}_run_redmapper_v{rm_version}_weighted_randoms_z010-095_lgt020_vl02_area.fit'):
+        zstr  = 'z%03d-%03d' % (int(round(self.z_range[0] * 100)), int(round(self.z_range[1] * 100)))
+        if os.path.isfile(os.path.dirname(self.outBase) + f'/{obase}_run_redmapper_v{rm_version}_weighted_randoms_{zstr}_lgt020_vl02_area.fit'):
             print("FILES EXIST. SKIPPING...")
             return None
         
