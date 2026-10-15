@@ -128,12 +128,14 @@ def calcErrorModel(_mag, _magErr, nSig=10.0, doPlot=False, nTrial=100, calcErr=F
         limmagStart = mag[gd[st[np.int32(0.95*st.size)]]]
 
     # figure out where to start the effective exposure time
-    # go from 1.0 to 10000, logarithmically...
-    # note that this range (from IDL code) works for zp=22.5.
+    # go from 1.0 to 1e8, logarithmically...
+    # note that this range works for zp=22.5.
     #  For other zps, need to rescale here
+    # The original IDL range stopped at 1e4 (max_p1 <= 1e5), which pins sky-dominated
+    # errors (e.g. Cardinal LSST mocks, T ~ 2e5-4e5) to the wall. Same steps per decade.
 
-    expRange=np.array([1.0,10000.])/(10.**((zp - 22.5)/2.5))
-    nSteps=20
+    expRange=np.array([1.0,1e8])/(10.**((zp - 22.5)/2.5))
+    nSteps=39
 
     binSize=(np.log(expRange[1])-np.log(expRange[0]))/(nSteps-1)
 
@@ -153,6 +155,10 @@ def calcErrorModel(_mag, _magErr, nSig=10.0, doPlot=False, nTrial=100, calcErr=F
     dFunc.max_p1 = 10.0*p0[1]
 
     ret = scipy.optimize.fmin(dFunc, p0,disp=False, full_output=True,retall=False)
+
+    # if it hit maxiter/maxfun, restart the simplex once from where it stopped
+    if (ret[-1] > 0):
+        ret = scipy.optimize.fmin(dFunc, ret[0], disp=False, full_output=True, retall=False)
 
     # check for convergence here...
     if (ret[-1] > 0):
