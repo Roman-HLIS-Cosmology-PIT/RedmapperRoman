@@ -1246,7 +1246,8 @@ class BaseRunner:
         data["redmagic_etas"]   = [0.5, 1.0]
         data["redmagic_n0s"]    = [10.0, 4.0]
         data["redmagic_names"]  = ['highdens', 'highlum']
-        data["redmagic_zmaxes"] = [0.75, 0.95]
+        # zmax beyond the cluster zrange indexes past redmapper's volume-limit area table
+        data["redmagic_zmaxes"] = [float(min(z, self.z_range[1] - 0.05)) for z in [0.75, 0.95]]
         data["redmagicfile"]    = self.outBase + '_redmagic_calib.fit'
         data["hpix"]            = self.make_calibration_hpix()
         data["nside"]           = self.nside_split
