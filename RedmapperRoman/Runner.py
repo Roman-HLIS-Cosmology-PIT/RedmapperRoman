@@ -39,6 +39,7 @@ class BaseRunner:
                  z_range  = [0.1, 0.95],
                  color_presel_thresh = [0.2]*9,
                  color_presel_maxerr = None,
+                 mstar_tag = None,
                  config_override = None,
                  zeropoint = 22.5,
                  calib_frac = 0.5):
@@ -137,6 +138,11 @@ class BaseRunner:
             What fraction of the area to be used for calibrating the cluster finder
             and red-sequence finder. Default is 0.5 (i.e., half the data)
 
+        mstar_tag: str, optional
+            If set, use calibdata/mstar/mstar_{survey}_{mstar_tag}_{refband}03.fit for m*(z)
+            (e.g. a version re-normalized to a mock's luminosity function) instead of
+            mstar_{survey}_{refband}03.fit. The BC03 initial colors are unchanged.
+
         color_presel_maxerr: float, optional
             If set, a color is only used in the spec-z red-sequence preselection when
             both of its bands have mag_err below this value, and each galaxy needs at
@@ -167,6 +173,7 @@ class BaseRunner:
         self.nside_split          = nside_split
         self.color_presel_thresh  = color_presel_thresh
         self.color_presel_maxerr  = color_presel_maxerr
+        self.mstar_survey         = survey if mstar_tag is None else f'{survey}_{mstar_tag}'
         self.config_override      = config_override
         self.zp                   = zeropoint
 
@@ -620,8 +627,8 @@ class BaseRunner:
         
         hpix_choice = self.make_calibration_hpix()
 
-        pin  = os.path.dirname(__file__) +  f'/../calibdata/mstar/mstar_{self.survey}_{self.refband}03.fit'
-        pout = resource_filename('redmapper', f'data/mstar/mstar_{self.survey}_{self.refband}03.fit')
+        pin  = os.path.dirname(__file__) +  f'/../calibdata/mstar/mstar_{self.mstar_survey}_{self.refband}03.fit'
+        pout = resource_filename('redmapper', f'data/mstar/mstar_{self.mstar_survey}_{self.refband}03.fit')
         shutil.copy(pin, pout)
 
         pin  = os.path.dirname(__file__) + f'/../calibdata/initcolors/bc03_colors_{self.survey}.fit'
@@ -675,7 +682,7 @@ class BaseRunner:
 
         # Name of the "survey" for the m*(z) file
         # (see README.md for details)
-        mstar_survey: {self.survey}
+        mstar_survey: {self.mstar_survey}
         # Name of the "band" for the m*(z) file
         mstar_band: {self.refband}03
 
@@ -1325,6 +1332,7 @@ if __name__ == '__main__':
     parser.add_argument("--refband",            action='store', type=str, default = 'F184')
     parser.add_argument("--color_presel_thresh",action='store', type=str, default = '0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2')
     parser.add_argument("--color_presel_maxerr",action='store', type=float, default = None)
+    parser.add_argument("--mstar_tag",          action='store', type=str, default = None)
     parser.add_argument("--z_range",            action='store', type=str, default = '0.1,0.95')
     parser.add_argument("--zeropoint",          action='store', type=str, default = '22.5')
     parser.add_argument("--calib_frac",         action='store', type=str, default = '0.5')
@@ -1360,4 +1368,5 @@ if __name__ == '__main__':
 
            color_presel_thresh = [float(c) for c in args['color_presel_thresh'].split(',')],
            color_presel_maxerr = args['color_presel_maxerr'],
+           mstar_tag  = args['mstar_tag'],
            ).go()
