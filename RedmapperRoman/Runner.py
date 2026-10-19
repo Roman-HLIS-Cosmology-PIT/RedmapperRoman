@@ -1072,8 +1072,7 @@ class BaseRunner:
         n_jobs   = self.n_jobs if n_jobs is None else n_jobs
         filelist = sorted(glob.glob(self.outBase + '_pix*_flux.fits')) #Get all files by checking for flux fits
         pixlist  = [int(f[-15:-10]) for f in filelist] #Get only the pixel part of the name
-        pixlist  = [pixlist[i] for i in np.random.choice(len(pixlist), len(pixlist), replace = False)] #Randomize to balance the load
-        
+
         #Find which hpix we have zreds for. Even though we start with the full catalog
         #We subselect and only run on regions with foreground mask (and fracgood) set.
         #So this figures out which coarse pixels can still be used.
@@ -1082,7 +1081,21 @@ class BaseRunner:
         # hpixlist = hp.ang2pix(8, *hp.pix2ang(32, hpixlist)); print(hpixlist)
 
         pixlist  = [p for p in pixlist if p in hpixlist]
-        
+
+        #Largest remaining work first (a pixel cannot be split across jobs, so a big pixel
+        #started late sets the wall time). Work ~ pixel galaxy-file size, reduced when the
+        #firstpass or likelihood stage of that pixel is already on disk from an earlier run.
+        obase = self._get_outbase_name()
+        def _remaining_work(p):
+            stem = os.path.dirname(self.outBase) + f'/{obase}_run_{self.nside_split}_{p:05d}'
+            work = os.path.getsize(self.outBase + f'_pix{p:05d}_flux.fits')
+            if os.path.isfile(stem + '_like_catalog.fit'):
+                return 0.1 * work
+            if os.path.isfile(stem + '_firstpass_catalog.fit'):
+                return 0.3 * work
+            return work
+        pixlist  = sorted(pixlist, key = _remaining_work, reverse = True)
+
 
         if n_jobs == -1: n_jobs = np.min([os.cpu_count(), len(filelist)])
 
