@@ -760,7 +760,9 @@ class BaseRunner:
         # Redshift spline node spacing for covariance matrix.  Default is 0.15
         calib_covmat_nodesize: 0.25
 
-        calib_covmat_constant: 0.9
+        # Intrinsic colour correlation: set calib_covmat_constant (same r for every colour pair)
+        # OR calib_covmat_corr (full ncol x ncol matrix) via config_override, not both.
+        # Neither set: redmapper uses a constant 0.9.
 
         # Redshift spline node spacing for zred corrections.  Default is 0.05
         calib_corr_nodesize: 0.1
