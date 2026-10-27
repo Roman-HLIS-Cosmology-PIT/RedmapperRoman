@@ -38,7 +38,7 @@ class BaseRunner:
                  Nrandoms = 1_000_000,
                  z_range  = [0.1, 0.95],
                  color_presel_thresh = [0.2]*9,
-                 color_presel_maxerr = None,
+                 color_presel_maxerr = 0.1,
                  mstar_file = None,
                  config_override = None,
                  zeropoint = 22.5,
@@ -150,11 +150,16 @@ class BaseRunner:
             name, or a different file already installed under that name, is installed as
             {survey}_custom<content hash>. The BC03 initial colors are unchanged.
 
-        color_presel_maxerr: float, optional
-            If set, a color is only used in the spec-z red-sequence preselection when
-            both of its bands have mag_err below this value, and each galaxy needs at
-            least one such color. Default None applies every color cut to every galaxy,
-            which removes all high-z spec-zs when shallow blue bands are included.
+        color_presel_maxerr: float or None, optional
+            Error threshold (mag) for the spec-z red-sequence preselection. The spec-z
+            galaxies that train the red sequence must have each colour within
+            color_presel_thresh of the BC03 model; a colour is only applied to a galaxy
+            when both of its bands have mag_err below color_presel_maxerr, and each galaxy
+            needs at least one colour that applies. Default 0.1. This keeps noisy colours
+            (e.g. u-g and g-r of faint high-z galaxies) from rejecting real red-sequence
+            galaxies: in the Cardinal LSST+Roman runs, applying every colour to every
+            galaxy (None) left no spec-zs above z = 1. None applies every colour cut to
+            every galaxy (the behaviour before this option existed).
         """
         
         self.outBase    = outBase
@@ -1419,7 +1424,8 @@ if __name__ == '__main__':
                         help = "Deprecated and ignored: band indices are derived from --bands.")
     parser.add_argument("--refband",            action='store', type=str, default = 'F184')
     parser.add_argument("--color_presel_thresh",action='store', type=str, default = '0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2')
-    parser.add_argument("--color_presel_maxerr",action='store', type=float, default = None)
+    parser.add_argument("--color_presel_maxerr",action='store', type=str, default = '0.1',
+                        help = "mag_err threshold for applying a colour in the spec-z preselection (default 0.1); 'none' applies every colour to every galaxy")
     parser.add_argument("--mstar_file",         action='store', type=str, default = None)
     parser.add_argument("--z_range",            action='store', type=str, default = '0.1,0.95')
     parser.add_argument("--zeropoint",          action='store', type=str, default = '22.5')
@@ -1455,6 +1461,6 @@ if __name__ == '__main__':
            seed       = args['seed'],
 
            color_presel_thresh = [float(c) for c in args['color_presel_thresh'].split(',')],
-           color_presel_maxerr = args['color_presel_maxerr'],
+           color_presel_maxerr = None if args['color_presel_maxerr'].lower() == 'none' else float(args['color_presel_maxerr']),
            mstar_file = args['mstar_file'],
            ).go()
