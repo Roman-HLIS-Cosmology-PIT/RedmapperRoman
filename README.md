@@ -68,7 +68,7 @@ The job broadly takes me about 24 hours on a 28 processes, for the Cardinal run.
 
 `bands`: comma-separated string of the bands to be used. Possible options are "U,G,R,I,Z,Y,F106,F129,F158,F184". The `survey` keyword identifies which bands are to be used, so these need to be consistent. If you say survey is lsst, but supply "F106,F129" the code will crash.
 
-`bands_inds`: What are the indices of the bands. It is best to just use 0,1,2,3,4,...,Nbands.
+`bands_inds`: Deprecated and ignored (still accepted, with a warning). Band indices are derived from `bands`: the master galaxy table records each band's position in `bands`, and the spec-z preselection looks up each colour in the colour model by band name (the BANDS header of `calibdata/initcolors/bc03_colors_<survey>.fit`). `bands` must follow the model's blue-to-red order but may skip bands (e.g. `g,i,z`).
 
 `refband` : Redmapper uses one band to compute the effective completeness, volume-limit of the data. It's best to pick a band that is sufficiently precise for characterizing objects across many redshifts.
 

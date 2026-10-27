@@ -31,7 +31,7 @@ class BaseRunner:
                  SPmap_names = ['maglim', 'fwhm', 'airmass', 'exptime', 'skybrite'],
                  seed = 42, calib_dir = None,
                  bands = ['U', 'G', 'R', 'I', 'Z', 'F106', 'F129', 'F158', 'F184'],
-                 bands_inds = [0, 1, 2, 3, 4, 5, 6, 7, 8],
+                 bands_inds = None,
                  survey  = 'roman',
                  refband = 'F184',
                  n_jobs = 32, nside_split = 32,
@@ -92,8 +92,10 @@ class BaseRunner:
             maps. Default corresponds to Roman-like bands.
 
         bands_inds : list of int, optional
-            Indices corresponding to the band ordering used internally in the
-            input catalog.
+            Deprecated and ignored. Band indices are derived from `bands`: the master
+            galaxy table uses each band's position in `bands`, and the spec-z
+            preselection looks up each colour in the colour model by band name
+            (the model file's BANDS header).
 
         survey : str, optional
             Name of the survey configuration being simulated or processed
@@ -154,9 +156,7 @@ class BaseRunner:
         self.seed       = seed
         self.calib_dir  = calib_dir
         self.bands      = bands
-        self.bands_inds = bands_inds
         self.refband    = refband
-        self.refbandind = bands_inds[bands.index(refband)]
         self.n_jobs     = n_jobs
         self.survey     = survey
         self.Nrandoms   = Nrandoms
@@ -181,6 +181,9 @@ class BaseRunner:
             if self.calib_dir[-1] == '/':
                 self.calib_dir = self.calib_dir[:-1]
                 print("Removing backspace from calib_dir")
+
+        if bands_inds is not None:
+            print("WARNING: bands_inds is deprecated and ignored; band indices are derived from bands.")
 
                 
 
@@ -478,7 +481,9 @@ class BaseRunner:
         info_dict['ZP']      = zp
         info_dict['B']       = np.array([b_array[refbands.index(b.upper())] for b in self.bands]) # if magnitudes are actually luptitudes
 
-        for b, i in zip(self.bands, self.bands_inds):
+        # Position of each band in the mag array: redmapper reads <REFBAND>_IND as ref_ind and builds its
+        # band list from these (Configuration._galfile_stats), so they must run 0..nmag-1 in self.bands order.
+        for i, b in enumerate(self.bands):
             info_dict[f'{b.upper()}_IND'] = i
     
         widefiles = sorted(glob.glob('%s_pix*_basic.fits' % (widebase)))
@@ -555,7 +560,8 @@ class BaseRunner:
             
         galaxy  = redmapper.galaxy.GalaxyCatalog.from_galfile(self.outBase + "_master_table.fit")
         allspec = fitsio.read(self.input_specz)
-        MODEL   = fitsio.read(os.path.dirname(__file__) + f'/../calibdata/initcolors/bc03_colors_{self.survey}.fit')
+        MODEL, MODEL_HDR = fitsio.read(os.path.dirname(__file__) + f'/../calibdata/initcolors/bc03_colors_{self.survey}.fit', header = True)
+        model_colors     = self._model_colors(MODEL, MODEL_HDR)
 
         print("LOADED ALL CATALOGS")
         
@@ -569,16 +575,13 @@ class BaseRunner:
 
         #Now plot the sequences
         use, = np.where(galmag[:, 0] > 0.0)
-        
-        assert np.all(np.diff(np.array(self.bands_inds)) == 1), \
-            "Input bands are offset by more than 1 filter. You need to use a new file for this analysis....Ping Dhayaa"
 
         QAcut  = np.ones(use.size, dtype = bool)
         nused  = np.zeros(use.size, dtype = int)
         for i in range(len(self.bands) - 1):
             THRESH= self.color_presel_thresh[i]
             data  = galmag[use, i] - galmag[use, i + 1]
-            model = np.interp(allspec['z'][use], MODEL['Z'], MODEL['COLOR'][:, self.bands_inds[i]])
+            model = np.interp(allspec['z'][use], MODEL['Z'], model_colors[:, i])
             if self.color_presel_maxerr is None:
                 good = np.ones(use.size, dtype = bool)
             else:
@@ -594,16 +597,47 @@ class BaseRunner:
             THRESH= self.color_presel_thresh[i]
             plt.hexbin(allspec['z'][use], (galmag[:, i] - galmag[:, i + 1])[use], extent=[0, 1, 0.0, 2.5], bins='log')
             plt.xlabel('z'); plt.ylabel(f'{self.bands[i]} - {self.bands[i + 1]}')
-            plt.plot(MODEL['Z'], MODEL['COLOR'][:, self.bands_inds[i]], 'b-')
-            plt.plot(MODEL['Z'], MODEL['COLOR'][:, self.bands_inds[i]] + THRESH, 'b:')
-            plt.plot(MODEL['Z'], MODEL['COLOR'][:, self.bands_inds[i]] - THRESH, 'b:')
+            plt.plot(MODEL['Z'], model_colors[:, i], 'b-')
+            plt.plot(MODEL['Z'], model_colors[:, i] + THRESH, 'b:')
+            plt.plot(MODEL['Z'], model_colors[:, i] - THRESH, 'b:')
             plt.savefig(self.outBase + f"_all_specz_z_{self.bands[i]}m{self.bands[i + 1]}.png"); plt.close()
 
         #Save the proper sample now
         fitsio.write(self.outBase + ".train_specz.fits", allspec[use[QAcut]], clobber = True)
 
         print("SAVED CUT CATALOG")
-    
+
+
+    def _model_colors(self, model, header):
+        """
+        Model red-sequence colour for each adjacent pair of self.bands (bands[i] - bands[i+1]).
+
+        The colour model stores colours of adjacent bands in the order given by its BANDS header
+        (e.g. 'u,g,r,i,z,y'). Each input band is located there by name (case-insensitive); a colour
+        of bands that are not adjacent in the model is the sum of the model colours in between
+        (e.g. g - i = (g - r) + (r - i)).
+        """
+        ncol_model = model['COLOR'].shape[1]
+        if 'BANDS' in header:
+            mbands = [b.strip().upper() for b in str(header['BANDS']).split(',')]
+        elif ncol_model == len(self.bands) - 1:
+            # Older model files without a BANDS header: assume they match the input bands exactly.
+            mbands = [b.upper() for b in self.bands]
+        else:
+            raise ValueError("The colour model for survey %s has no BANDS header and %d colours, but %d bands "
+                             "were given; add a BANDS header to the model file." % (self.survey, ncol_model, len(self.bands)))
+        if len(mbands) != ncol_model + 1:
+            raise ValueError("Colour model BANDS header %s does not match its %d colours." % (mbands, ncol_model))
+
+        missing = [b for b in self.bands if b.upper() not in mbands]
+        if missing:
+            raise ValueError("Bands %s are not in the colour model for survey %s (model bands: %s)." % (missing, self.survey, mbands))
+        pos = [mbands.index(b.upper()) for b in self.bands]
+        if np.any(np.diff(pos) <= 0):
+            raise ValueError("Bands %s must be ordered as in the colour model (%s)." % (self.bands, mbands))
+
+        return np.stack([model['COLOR'][:, p0:p1].sum(axis = 1) for p0, p1 in zip(pos[:-1], pos[1:])], axis = 1)
+
 
     @timeit
     def make_calibration_hpix(self):
@@ -1343,7 +1377,8 @@ if __name__ == '__main__':
     parser.add_argument("--seed",               action='store', type=int, default = 42)
     parser.add_argument("--calib_dir",          action='store', type=str, default = None)
     parser.add_argument("--bands",              action='store', type=str, default = "U,G,R,I,Z,Y,F106,F129,F158,F184")
-    parser.add_argument("--bands_inds",         action='store', type=str, default = "0,1,2,3,4,5,6,7,8,9")
+    parser.add_argument("--bands_inds",         action='store', type=str, default = None,
+                        help = "Deprecated and ignored: band indices are derived from --bands.")
     parser.add_argument("--refband",            action='store', type=str, default = 'F184')
     parser.add_argument("--color_presel_thresh",action='store', type=str, default = '0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2')
     parser.add_argument("--color_presel_maxerr",action='store', type=float, default = None)
@@ -1363,7 +1398,7 @@ if __name__ == '__main__':
     Runner(outBase    = os.environ['TMPDIR'] + '/Eli', 
            calib_dir  = args['calib_dir'],
            bands      = args['bands'].split(','), 
-           bands_inds = [int(b) for b in args['bands_inds'].split(',')],
+           bands_inds = None if args['bands_inds'] is None else [int(b) for b in args['bands_inds'].split(',')],
            refband    = args['refband'],
            survey     = args['survey'],
            z_range    = [float(z) for z in args['z_range'].split(',')],
