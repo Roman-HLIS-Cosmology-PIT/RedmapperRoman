@@ -72,6 +72,10 @@ The job broadly takes me about 24 hours on a 28 processes, for the Cardinal run.
 
 `refband` : Redmapper uses one band to compute the effective completeness, volume-limit of the data. It's best to pick a band that is sufficiently precise for characterizing objects across many redshifts.
 
+`mstar_file` : Optional path (anywhere) to an m*(z) table in redmapper's mstar format for the reference band, used instead of the default `calibdata/mstar/mstar_<survey>_<refband>03.fit` (e.g. a version re-normalized to a mock's luminosity function). redmapper looks m* tables up by name in its own `data/mstar` directory, so the file is copied there: a file named `mstar_<name>_<refband>03.fit` is installed as `mstar_survey: <name>`; any other name, or a different file already installed under that name, gets `<survey>_custom<content hash>`.
+
+`color_presel_thresh`, `color_presel_maxerr` : The spec-z galaxies used to train the red sequence are preselected by requiring each colour to lie within `color_presel_thresh` (comma-separated, one per colour) of the BC03 model. With `color_presel_maxerr` set, a colour is only applied to a galaxy when both of its bands have mag_err below that value (and at least one colour must apply). Leave it unset for shallow-band-free runs; for LSST+Roman to high redshift use e.g. 0.1, otherwise the noisy u/g colours of faint high-z galaxies remove essentially all spec-zs above z ~ 0.8.
+
 `config_override` : Path to a yaml file that contains the parameter values you want to override (relative to the defaults). This file should have the same structure as the redmapper configs from Eli: https://github.com/DhayaaAnbajagane/redmapper/blob/main/how-to/cal_example.yml. We use the params in your override file, look for the params in the run's config and override them. So naming consistency is critical.
 
 `zeropoint` : The zeropoint of the fluxes in the flux-2-mag conversion. Defaults to 22.5 based on Chun-Hao To's definitions for Roman.

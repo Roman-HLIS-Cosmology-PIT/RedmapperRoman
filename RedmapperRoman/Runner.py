@@ -1,7 +1,7 @@
 import redmapper
 import numpy as np, matplotlib.pyplot as plt
 import healsparse as hsp, fitsio, h5py, healpy as hp
-import os, re, time, glob, joblib, textwrap, shutil, yaml, pathlib
+import os, re, time, glob, joblib, textwrap, shutil, yaml, pathlib, hashlib, filecmp
 from tqdm import tqdm
 from pkg_resources import resource_filename
 
@@ -39,7 +39,7 @@ class BaseRunner:
                  z_range  = [0.1, 0.95],
                  color_presel_thresh = [0.2]*9,
                  color_presel_maxerr = None,
-                 mstar_tag = None,
+                 mstar_file = None,
                  config_override = None,
                  zeropoint = 22.5,
                  calib_frac = 0.5):
@@ -140,10 +140,15 @@ class BaseRunner:
             What fraction of the area to be used for calibrating the cluster finder
             and red-sequence finder. Default is 0.5 (i.e., half the data)
 
-        mstar_tag: str, optional
-            If set, use calibdata/mstar/mstar_{survey}_{mstar_tag}_{refband}03.fit for m*(z)
-            (e.g. a version re-normalized to a mock's luminosity function) instead of
-            mstar_{survey}_{refband}03.fit. The BC03 initial colors are unchanged.
+        mstar_file: str, optional
+            Path to an m*(z) table (redmapper mstar format, for the reference band) to use
+            instead of calibdata/mstar/mstar_{survey}_{refband}03.fit, e.g. a version
+            re-normalized to a mock's luminosity function. It can live anywhere: it is
+            copied into redmapper's data/mstar directory (where redmapper looks up m* tables
+            by name) when the config is written. A file named
+            mstar_<name>_{refband}03.fit is installed as mstar_survey <name>; any other
+            name, or a different file already installed under that name, is installed as
+            {survey}_custom<content hash>. The BC03 initial colors are unchanged.
 
         color_presel_maxerr: float, optional
             If set, a color is only used in the spec-z red-sequence preselection when
@@ -173,7 +178,8 @@ class BaseRunner:
         self.nside_split          = nside_split
         self.color_presel_thresh  = color_presel_thresh
         self.color_presel_maxerr  = color_presel_maxerr
-        self.mstar_survey         = survey if mstar_tag is None else f'{survey}_{mstar_tag}'
+        self.mstar_file           = mstar_file
+        self.mstar_survey         = survey          # replaced by _install_mstar_file() in make_config_yaml
         self.config_override      = config_override
         self.zp                   = zeropoint
 
@@ -656,14 +662,46 @@ class BaseRunner:
         return hpix_choice
     
 
+    def _install_mstar_file(self):
+        """
+        Copy the m*(z) table into redmapper's data/mstar directory, where redmapper looks it up as
+        mstar_{mstar_survey}_{mstar_band}.fit (mstar_band = {refband}03), and return the mstar_survey name.
+
+        Source: self.mstar_file if given (any path), else calibdata/mstar/mstar_{survey}_{refband}03.fit.
+        A file named mstar_<name>_{refband}03.fit keeps <name>; otherwise, or if a different file is
+        already installed under that name, the name is {survey}_custom<first 8 hex of its SHA-1>, so the
+        same file always gets the same name and different files never overwrite each other.
+        """
+        band = f'{self.refband}03'
+        if self.mstar_file is None:
+            src = os.path.dirname(__file__) + f'/../calibdata/mstar/mstar_{self.survey}_{band}.fit'
+        else:
+            src = os.path.abspath(os.path.expanduser(self.mstar_file))
+        if not os.path.isfile(src):
+            raise FileNotFoundError(f"m* file not found: {src}")
+
+        with open(src, 'rb') as f:
+            digest = hashlib.sha1(f.read()).hexdigest()[:8]
+        m = re.fullmatch(r'mstar_(.+)_' + re.escape(band) + r'\.fit', os.path.basename(src))
+        names = ([m.group(1)] if m else []) + [f'{self.survey}_custom{digest}']
+        for name in names:
+            dst = resource_filename('redmapper', f'data/mstar/mstar_{name}_{band}.fit')
+            if not os.path.exists(dst) or filecmp.cmp(src, dst, shallow = False):
+                break
+        else:
+            raise RuntimeError(f"Could not install {src}: {dst} exists with different content")
+        if not os.path.exists(dst):
+            shutil.copy(src, dst)
+        print(f"M* TABLE {src} INSTALLED AS mstar_survey {name}, mstar_band {band}")
+        return name
+
+
     @timeit
     def make_config_yaml(self):
         
         hpix_choice = self.make_calibration_hpix()
 
-        pin  = os.path.dirname(__file__) +  f'/../calibdata/mstar/mstar_{self.mstar_survey}_{self.refband}03.fit'
-        pout = resource_filename('redmapper', f'data/mstar/mstar_{self.mstar_survey}_{self.refband}03.fit')
-        shutil.copy(pin, pout)
+        self.mstar_survey = self._install_mstar_file()
 
         pin  = os.path.dirname(__file__) + f'/../calibdata/initcolors/bc03_colors_{self.survey}.fit'
         pout = resource_filename('redmapper', f'data/initcolors/bc03_colors_{self.survey}.fit')
@@ -1382,7 +1420,7 @@ if __name__ == '__main__':
     parser.add_argument("--refband",            action='store', type=str, default = 'F184')
     parser.add_argument("--color_presel_thresh",action='store', type=str, default = '0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2')
     parser.add_argument("--color_presel_maxerr",action='store', type=float, default = None)
-    parser.add_argument("--mstar_tag",          action='store', type=str, default = None)
+    parser.add_argument("--mstar_file",         action='store', type=str, default = None)
     parser.add_argument("--z_range",            action='store', type=str, default = '0.1,0.95')
     parser.add_argument("--zeropoint",          action='store', type=str, default = '22.5')
     parser.add_argument("--calib_frac",         action='store', type=str, default = '0.5')
@@ -1418,5 +1456,5 @@ if __name__ == '__main__':
 
            color_presel_thresh = [float(c) for c in args['color_presel_thresh'].split(',')],
            color_presel_maxerr = args['color_presel_maxerr'],
-           mstar_tag  = args['mstar_tag'],
+           mstar_file = args['mstar_file'],
            ).go()
