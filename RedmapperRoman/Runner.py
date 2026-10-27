@@ -1,7 +1,7 @@
 import redmapper
 import numpy as np, matplotlib.pyplot as plt
 import healsparse as hsp, fitsio, h5py, healpy as hp
-import os, re, time, glob, joblib, textwrap, shutil, yaml, pathlib
+import os, re, time, glob, joblib, textwrap, shutil, yaml, pathlib, hashlib, filecmp
 from tqdm import tqdm
 from pkg_resources import resource_filename
 
@@ -31,13 +31,15 @@ class BaseRunner:
                  SPmap_names = ['maglim', 'fwhm', 'airmass', 'exptime', 'skybrite'],
                  seed = 42, calib_dir = None,
                  bands = ['U', 'G', 'R', 'I', 'Z', 'F106', 'F129', 'F158', 'F184'],
-                 bands_inds = [0, 1, 2, 3, 4, 5, 6, 7, 8],
+                 bands_inds = None,
                  survey  = 'roman',
                  refband = 'F184',
                  n_jobs = 32, nside_split = 32,
                  Nrandoms = 1_000_000,
                  z_range  = [0.1, 0.95],
                  color_presel_thresh = [0.2]*9,
+                 color_presel_maxerr = 0.1,
+                 mstar_file = None,
                  config_override = None,
                  zeropoint = 22.5,
                  calib_frac = 0.5):
@@ -90,8 +92,10 @@ class BaseRunner:
             maps. Default corresponds to Roman-like bands.
 
         bands_inds : list of int, optional
-            Indices corresponding to the band ordering used internally in the
-            input catalog.
+            Deprecated and ignored. Band indices are derived from `bands`: the master
+            galaxy table uses each band's position in `bands`, and the spec-z
+            preselection looks up each colour in the colour model by band name
+            (the model file's BANDS header).
 
         survey : str, optional
             Name of the survey configuration being simulated or processed
@@ -135,15 +139,34 @@ class BaseRunner:
         calib_frac: float, option
             What fraction of the area to be used for calibrating the cluster finder
             and red-sequence finder. Default is 0.5 (i.e., half the data)
+
+        mstar_file: str, optional
+            Path to an m*(z) table (redmapper mstar format, for the reference band) to use
+            instead of calibdata/mstar/mstar_{survey}_{refband}03.fit, e.g. a version
+            re-normalized to a mock's luminosity function. It can live anywhere: it is
+            copied into redmapper's data/mstar directory (where redmapper looks up m* tables
+            by name) when the config is written. A file named
+            mstar_<name>_{refband}03.fit is installed as mstar_survey <name>; any other
+            name, or a different file already installed under that name, is installed as
+            {survey}_custom<content hash>. The BC03 initial colors are unchanged.
+
+        color_presel_maxerr: float or None, optional
+            Error threshold (mag) for the spec-z red-sequence preselection. The spec-z
+            galaxies that train the red sequence must have each colour within
+            color_presel_thresh of the BC03 model; a colour is only applied to a galaxy
+            when both of its bands have mag_err below color_presel_maxerr, and each galaxy
+            needs at least one colour that applies. Default 0.1. This keeps noisy colours
+            (e.g. u-g and g-r of faint high-z galaxies) from rejecting real red-sequence
+            galaxies: in the Cardinal LSST+Roman runs, applying every colour to every
+            galaxy (None) left no spec-zs above z = 1. None applies every colour cut to
+            every galaxy (the behaviour before this option existed).
         """
         
         self.outBase    = outBase
         self.seed       = seed
         self.calib_dir  = calib_dir
         self.bands      = bands
-        self.bands_inds = bands_inds
         self.refband    = refband
-        self.refbandind = bands_inds[bands.index(refband)]
         self.n_jobs     = n_jobs
         self.survey     = survey
         self.Nrandoms   = Nrandoms
@@ -159,6 +182,9 @@ class BaseRunner:
         self.SPmap_names          = SPmap_names
         self.nside_split          = nside_split
         self.color_presel_thresh  = color_presel_thresh
+        self.color_presel_maxerr  = color_presel_maxerr
+        self.mstar_file           = mstar_file
+        self.mstar_survey         = survey          # replaced by _install_mstar_file() in make_config_yaml
         self.config_override      = config_override
         self.zp                   = zeropoint
 
@@ -166,6 +192,9 @@ class BaseRunner:
             if self.calib_dir[-1] == '/':
                 self.calib_dir = self.calib_dir[:-1]
                 print("Removing backspace from calib_dir")
+
+        if bands_inds is not None:
+            print("WARNING: bands_inds is deprecated and ignored; band indices are derived from bands.")
 
                 
 
@@ -463,7 +492,9 @@ class BaseRunner:
         info_dict['ZP']      = zp
         info_dict['B']       = np.array([b_array[refbands.index(b.upper())] for b in self.bands]) # if magnitudes are actually luptitudes
 
-        for b, i in zip(self.bands, self.bands_inds):
+        # Position of each band in the mag array: redmapper reads <REFBAND>_IND as ref_ind and builds its
+        # band list from these (Configuration._galfile_stats), so they must run 0..nmag-1 in self.bands order.
+        for i, b in enumerate(self.bands):
             info_dict[f'{b.upper()}_IND'] = i
     
         widefiles = sorted(glob.glob('%s_pix*_basic.fits' % (widebase)))
@@ -540,7 +571,8 @@ class BaseRunner:
             
         galaxy  = redmapper.galaxy.GalaxyCatalog.from_galfile(self.outBase + "_master_table.fit")
         allspec = fitsio.read(self.input_specz)
-        MODEL   = fitsio.read(os.path.dirname(__file__) + f'/../calibdata/initcolors/bc03_colors_{self.survey}.fit')
+        MODEL, MODEL_HDR = fitsio.read(os.path.dirname(__file__) + f'/../calibdata/initcolors/bc03_colors_{self.survey}.fit', header = True)
+        model_colors     = self._model_colors(MODEL, MODEL_HDR)
 
         print("LOADED ALL CATALOGS")
         
@@ -548,22 +580,27 @@ class BaseRunner:
 
         allspec = allspec[id1]
         galmag  = galaxy.mag[id2]
+        galerr  = galaxy.mag_err[id2]
 
         print(f"FINISHED MATCHING. FOUND {len(allspec)} MATCHES.")
 
         #Now plot the sequences
         use, = np.where(galmag[:, 0] > 0.0)
-        
-        assert np.all(np.diff(np.array(self.bands_inds)) == 1), \
-            "Input bands are offset by more than 1 filter. You need to use a new file for this analysis....Ping Dhayaa"
 
-        QAcut  = True
+        QAcut  = np.ones(use.size, dtype = bool)
+        nused  = np.zeros(use.size, dtype = int)
         for i in range(len(self.bands) - 1):
             THRESH= self.color_presel_thresh[i]
-            data  = galmag[:, i] - galmag[:, i + 1]
-            model = np.interp(allspec['z'][use], MODEL['Z'], MODEL['COLOR'][:, self.bands_inds[i]])
-            QAcut = QAcut & (np.abs(model - data) <= THRESH)
-        
+            data  = galmag[use, i] - galmag[use, i + 1]
+            model = np.interp(allspec['z'][use], MODEL['Z'], model_colors[:, i])
+            if self.color_presel_maxerr is None:
+                good = np.ones(use.size, dtype = bool)
+            else:
+                good = (galerr[use, i] < self.color_presel_maxerr) & (galerr[use, i + 1] < self.color_presel_maxerr)
+            QAcut = QAcut & (~good | (np.abs(model - data) <= THRESH))
+            nused = nused + good
+        QAcut = QAcut & (nused >= 1)
+
         print(f"FINISHED CULLING. WE HAVE {len(use[QAcut])} MATCHES.")
 
         plt.close()
@@ -571,16 +608,47 @@ class BaseRunner:
             THRESH= self.color_presel_thresh[i]
             plt.hexbin(allspec['z'][use], (galmag[:, i] - galmag[:, i + 1])[use], extent=[0, 1, 0.0, 2.5], bins='log')
             plt.xlabel('z'); plt.ylabel(f'{self.bands[i]} - {self.bands[i + 1]}')
-            plt.plot(MODEL['Z'], MODEL['COLOR'][:, self.bands_inds[i]], 'b-')
-            plt.plot(MODEL['Z'], MODEL['COLOR'][:, self.bands_inds[i]] + THRESH, 'b:')
-            plt.plot(MODEL['Z'], MODEL['COLOR'][:, self.bands_inds[i]] - THRESH, 'b:')
+            plt.plot(MODEL['Z'], model_colors[:, i], 'b-')
+            plt.plot(MODEL['Z'], model_colors[:, i] + THRESH, 'b:')
+            plt.plot(MODEL['Z'], model_colors[:, i] - THRESH, 'b:')
             plt.savefig(self.outBase + f"_all_specz_z_{self.bands[i]}m{self.bands[i + 1]}.png"); plt.close()
 
         #Save the proper sample now
         fitsio.write(self.outBase + ".train_specz.fits", allspec[use[QAcut]], clobber = True)
 
         print("SAVED CUT CATALOG")
-    
+
+
+    def _model_colors(self, model, header):
+        """
+        Model red-sequence colour for each adjacent pair of self.bands (bands[i] - bands[i+1]).
+
+        The colour model stores colours of adjacent bands in the order given by its BANDS header
+        (e.g. 'u,g,r,i,z,y'). Each input band is located there by name (case-insensitive); a colour
+        of bands that are not adjacent in the model is the sum of the model colours in between
+        (e.g. g - i = (g - r) + (r - i)).
+        """
+        ncol_model = model['COLOR'].shape[1]
+        if 'BANDS' in header:
+            mbands = [b.strip().upper() for b in str(header['BANDS']).split(',')]
+        elif ncol_model == len(self.bands) - 1:
+            # Older model files without a BANDS header: assume they match the input bands exactly.
+            mbands = [b.upper() for b in self.bands]
+        else:
+            raise ValueError("The colour model for survey %s has no BANDS header and %d colours, but %d bands "
+                             "were given; add a BANDS header to the model file." % (self.survey, ncol_model, len(self.bands)))
+        if len(mbands) != ncol_model + 1:
+            raise ValueError("Colour model BANDS header %s does not match its %d colours." % (mbands, ncol_model))
+
+        missing = [b for b in self.bands if b.upper() not in mbands]
+        if missing:
+            raise ValueError("Bands %s are not in the colour model for survey %s (model bands: %s)." % (missing, self.survey, mbands))
+        pos = [mbands.index(b.upper()) for b in self.bands]
+        if np.any(np.diff(pos) <= 0):
+            raise ValueError("Bands %s must be ordered as in the colour model (%s)." % (self.bands, mbands))
+
+        return np.stack([model['COLOR'][:, p0:p1].sum(axis = 1) for p0, p1 in zip(pos[:-1], pos[1:])], axis = 1)
+
 
     @timeit
     def make_calibration_hpix(self):
@@ -599,14 +667,46 @@ class BaseRunner:
         return hpix_choice
     
 
+    def _install_mstar_file(self):
+        """
+        Copy the m*(z) table into redmapper's data/mstar directory, where redmapper looks it up as
+        mstar_{mstar_survey}_{mstar_band}.fit (mstar_band = {refband}03), and return the mstar_survey name.
+
+        Source: self.mstar_file if given (any path), else calibdata/mstar/mstar_{survey}_{refband}03.fit.
+        A file named mstar_<name>_{refband}03.fit keeps <name>; otherwise, or if a different file is
+        already installed under that name, the name is {survey}_custom<first 8 hex of its SHA-1>, so the
+        same file always gets the same name and different files never overwrite each other.
+        """
+        band = f'{self.refband}03'
+        if self.mstar_file is None:
+            src = os.path.dirname(__file__) + f'/../calibdata/mstar/mstar_{self.survey}_{band}.fit'
+        else:
+            src = os.path.abspath(os.path.expanduser(self.mstar_file))
+        if not os.path.isfile(src):
+            raise FileNotFoundError(f"m* file not found: {src}")
+
+        with open(src, 'rb') as f:
+            digest = hashlib.sha1(f.read()).hexdigest()[:8]
+        m = re.fullmatch(r'mstar_(.+)_' + re.escape(band) + r'\.fit', os.path.basename(src))
+        names = ([m.group(1)] if m else []) + [f'{self.survey}_custom{digest}']
+        for name in names:
+            dst = resource_filename('redmapper', f'data/mstar/mstar_{name}_{band}.fit')
+            if not os.path.exists(dst) or filecmp.cmp(src, dst, shallow = False):
+                break
+        else:
+            raise RuntimeError(f"Could not install {src}: {dst} exists with different content")
+        if not os.path.exists(dst):
+            shutil.copy(src, dst)
+        print(f"M* TABLE {src} INSTALLED AS mstar_survey {name}, mstar_band {band}")
+        return name
+
+
     @timeit
     def make_config_yaml(self):
         
         hpix_choice = self.make_calibration_hpix()
 
-        pin  = os.path.dirname(__file__) +  f'/../calibdata/mstar/mstar_{self.survey}_{self.refband}03.fit'
-        pout = resource_filename('redmapper', f'data/mstar/mstar_{self.survey}_{self.refband}03.fit')
-        shutil.copy(pin, pout)
+        self.mstar_survey = self._install_mstar_file()
 
         pin  = os.path.dirname(__file__) + f'/../calibdata/initcolors/bc03_colors_{self.survey}.fit'
         pout = resource_filename('redmapper', f'data/initcolors/bc03_colors_{self.survey}.fit')
@@ -659,7 +759,7 @@ class BaseRunner:
 
         # Name of the "survey" for the m*(z) file
         # (see README.md for details)
-        mstar_survey: {self.survey}
+        mstar_survey: {self.mstar_survey}
         # Name of the "band" for the m*(z) file
         mstar_band: {self.refband}03
 
@@ -737,7 +837,9 @@ class BaseRunner:
         # Redshift spline node spacing for covariance matrix.  Default is 0.15
         calib_covmat_nodesize: 0.25
 
-        calib_covmat_constant: 0.9
+        # Intrinsic colour correlation: set calib_covmat_constant (same r for every colour pair)
+        # OR calib_covmat_corr (full ncol x ncol matrix) via config_override, not both.
+        # Neither set: redmapper uses a constant 0.9.
 
         # Redshift spline node spacing for zred corrections.  Default is 0.05
         calib_corr_nodesize: 0.1
@@ -1049,8 +1151,7 @@ class BaseRunner:
         n_jobs   = self.n_jobs if n_jobs is None else n_jobs
         filelist = sorted(glob.glob(self.outBase + '_pix*_flux.fits')) #Get all files by checking for flux fits
         pixlist  = [int(f[-15:-10]) for f in filelist] #Get only the pixel part of the name
-        pixlist  = [pixlist[i] for i in np.random.choice(len(pixlist), len(pixlist), replace = False)] #Randomize to balance the load
-        
+
         #Find which hpix we have zreds for. Even though we start with the full catalog
         #We subselect and only run on regions with foreground mask (and fracgood) set.
         #So this figures out which coarse pixels can still be used.
@@ -1059,7 +1160,21 @@ class BaseRunner:
         # hpixlist = hp.ang2pix(8, *hp.pix2ang(32, hpixlist)); print(hpixlist)
 
         pixlist  = [p for p in pixlist if p in hpixlist]
-        
+
+        #Largest remaining work first (a pixel cannot be split across jobs, so a big pixel
+        #started late sets the wall time). Work ~ pixel galaxy-file size, reduced when the
+        #firstpass or likelihood stage of that pixel is already on disk from an earlier run.
+        obase = self._get_outbase_name()
+        def _remaining_work(p):
+            stem = os.path.dirname(self.outBase) + f'/{obase}_run_{self.nside_split}_{p:05d}'
+            work = os.path.getsize(self.outBase + f'_pix{p:05d}_flux.fits')
+            if os.path.isfile(stem + '_like_catalog.fit'):
+                return 0.1 * work
+            if os.path.isfile(stem + '_firstpass_catalog.fit'):
+                return 0.3 * work
+            return work
+        pixlist  = sorted(pixlist, key = _remaining_work, reverse = True)
+
 
         if n_jobs == -1: n_jobs = np.min([os.cpu_count(), len(filelist)])
 
@@ -1183,7 +1298,8 @@ class BaseRunner:
     def weight_randoms(self, config):
 
         obase = self._get_outbase_name()
-        if os.path.isfile(os.path.dirname(self.outBase) + f'/{obase}_run_redmapper_v{rm_version}_weighted_randoms_z010-095_lgt020_vl02_area.fit'):
+        zstr  = 'z%03d-%03d' % (int(round(self.z_range[0] * 100)), int(round(self.z_range[1] * 100)))
+        if os.path.isfile(os.path.dirname(self.outBase) + f'/{obase}_run_redmapper_v{rm_version}_weighted_randoms_{zstr}_lgt020_vl02_area.fit'):
             print("FILES EXIST. SKIPPING...")
             return None
         
@@ -1229,7 +1345,8 @@ class BaseRunner:
         data["redmagic_etas"]   = [0.5, 1.0]
         data["redmagic_n0s"]    = [10.0, 4.0]
         data["redmagic_names"]  = ['highdens', 'highlum']
-        data["redmagic_zmaxes"] = [0.75, 0.95]
+        # zmax beyond the cluster zrange indexes past redmapper's volume-limit area table
+        data["redmagic_zmaxes"] = [float(min(z, self.z_range[1] - 0.05)) for z in [0.75, 0.95]]
         data["redmagicfile"]    = self.outBase + '_redmagic_calib.fit'
         data["hpix"]            = self.make_calibration_hpix()
         data["nside"]           = self.nside_split
@@ -1303,9 +1420,13 @@ if __name__ == '__main__':
     parser.add_argument("--seed",               action='store', type=int, default = 42)
     parser.add_argument("--calib_dir",          action='store', type=str, default = None)
     parser.add_argument("--bands",              action='store', type=str, default = "U,G,R,I,Z,Y,F106,F129,F158,F184")
-    parser.add_argument("--bands_inds",         action='store', type=str, default = "0,1,2,3,4,5,6,7,8,9")
+    parser.add_argument("--bands_inds",         action='store', type=str, default = None,
+                        help = "Deprecated and ignored: band indices are derived from --bands.")
     parser.add_argument("--refband",            action='store', type=str, default = 'F184')
     parser.add_argument("--color_presel_thresh",action='store', type=str, default = '0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2')
+    parser.add_argument("--color_presel_maxerr",action='store', type=str, default = '0.1',
+                        help = "mag_err threshold for applying a colour in the spec-z preselection (default 0.1); 'none' applies every colour to every galaxy")
+    parser.add_argument("--mstar_file",         action='store', type=str, default = None)
     parser.add_argument("--z_range",            action='store', type=str, default = '0.1,0.95')
     parser.add_argument("--zeropoint",          action='store', type=str, default = '22.5')
     parser.add_argument("--calib_frac",         action='store', type=str, default = '0.5')
@@ -1321,7 +1442,7 @@ if __name__ == '__main__':
     Runner(outBase    = os.environ['TMPDIR'] + '/Eli', 
            calib_dir  = args['calib_dir'],
            bands      = args['bands'].split(','), 
-           bands_inds = [int(b) for b in args['bands_inds'].split(',')],
+           bands_inds = None if args['bands_inds'] is None else [int(b) for b in args['bands_inds'].split(',')],
            refband    = args['refband'],
            survey     = args['survey'],
            z_range    = [float(z) for z in args['z_range'].split(',')],
@@ -1339,5 +1460,7 @@ if __name__ == '__main__':
            n_jobs     = args['n_jobs'],
            seed       = args['seed'],
 
-           color_presel_thresh = [float(c) for c in args['color_presel_thresh'].split(',')]
+           color_presel_thresh = [float(c) for c in args['color_presel_thresh'].split(',')],
+           color_presel_maxerr = None if args['color_presel_maxerr'].lower() == 'none' else float(args['color_presel_maxerr']),
+           mstar_file = args['mstar_file'],
            ).go()
