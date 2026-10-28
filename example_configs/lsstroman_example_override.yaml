@@ -1,0 +1,68 @@
+# Example RedmapperRoman config override: LSST+Roman (bands u,g,r,i,z,y,F106,F129,F158,F184; 9 colours:
+# u-g, g-r, r-i, i-z, z-y, y-F106, F106-F129, F129-F158, F158-F184), tuned on the Cardinal mock.
+# Used for the v6 test run (RUNS/v6/LSSTRoman_chi33).
+#
+# Run with (paths for this project; adapt to yours):
+#   cd RedmapperRoman && python -m RedmapperRoman.Runner \
+#     --outdir <run dir> --SPmap_path <run dir>/MAP --n_jobs 28 \
+#     --bands u,g,r,i,z,y,F106,F129,F158,F184 --survey lsst_roman --refband F129 --z_range 0.1,1.5 \
+#     --calib_frac 1.0 --color_presel_thresh 0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2 \
+#     --mstar_file <RedmapperRoman>/calibdata/mstar/mstar_lsst_roman_Cardinal_F12903.fit \
+#     --input_catalog_hdf5 ... --input_specz ... --fracdet_map ... --foreground_map ... \
+#     --config_override <this file>
+# --SPmap_path is a filename prefix: the Runner reads <prefix>_<band>_<sys>.hpy (sys = maglim, fwhm, airmass,
+# exptime, skybrite) and copies them next to the run's outputs; with <run dir>/MAP the files (or symlinks)
+# MAP_<band>_<sys>.hpy sit directly in the run dir.
+# Band indices come from --bands (no --bands_inds); --color_presel_maxerr defaults to 0.1, which this band
+# set needs (without it the noisy u/g colours remove all spec-zs above z ~ 1).
+#
+# Cardinal-specific values: calib_covmat_corr, calib_colormem_sigint and the m* file. Re-measure them for
+# other data. vlim_depthfiles must point at the run's own depth files: change the paths for another run.
+
+calib_pivotmag_nodesize: 0.1
+# Node spacings for each colour / slope (arrays of length nmag - 1)
+calib_color_nodesizes: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+calib_slope_nodesizes: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+# u is shallow: only use u-g in detail at low redshift (SDSS-style)
+calib_color_maxnodes: [0.4, -1, -1, -1, -1, -1, -1, -1, -1]
+calib_covmat_maxnodes: [0.4, -1, -1, -1, -1, -1, -1, -1, -1]
+calib_covmat_nodesize: 0.25
+# Intrinsic correlation of red-sequence colour offsets, measured from Cardinal true cluster members.
+# Use either this full matrix or calib_covmat_constant (one value for all pairs; 0.9 rejected ~30% of
+# Cardinal's red members here), not both.
+# Order: u-g, g-r, r-i, i-z, z-y, y-F106, F106-F129, F129-F158, F158-F184
+calib_covmat_corr: [[1.000, 0.884, 0.678, 0.462, 0.617, 0.400, 0.356, 0.263, 0.222],
+                    [0.884, 1.000, 0.869, 0.687, 0.546, 0.572, 0.424, 0.274, 0.153],
+                    [0.678, 0.869, 1.000, 0.791, 0.676, 0.793, 0.615, 0.446, 0.296],
+                    [0.462, 0.687, 0.791, 1.000, 0.568, 0.847, 0.783, 0.655, 0.538],
+                    [0.617, 0.546, 0.676, 0.568, 1.000, 0.706, 0.775, 0.739, 0.672],
+                    [0.400, 0.572, 0.793, 0.847, 0.706, 1.000, 0.906, 0.823, 0.733],
+                    [0.356, 0.424, 0.615, 0.783, 0.775, 0.906, 1.000, 0.924, 0.882],
+                    [0.263, 0.274, 0.446, 0.655, 0.739, 0.823, 0.924, 1.000, 0.938],
+                    [0.222, 0.153, 0.296, 0.538, 0.672, 0.733, 0.882, 0.938, 1.000]]
+# Width-fit window in units of the training members' spread (default 1.5). The NIR red sequence has a red
+# tail, which a 1.5 sigma window truncates into a too-narrow intrinsic scatter.
+calib_color_nsig: 3.0
+
+# Zeroth-iteration colour training: the colour straddling the 4000A break in each redshift range
+#  z<0.35: g-r (1), 0.35-0.72: r-i (2), 0.72-1.1: i-z (3), z>1.1: z-y (4)
+calib_colormem_colormodes: [1, 2, 3, 4]
+calib_colormem_zbounds: [0.35, 0.72, 1.1]
+# Scatter of each of those colours over its redshift range (Cardinal)
+calib_colormem_sigint: [0.051, 0.051, 0.099, 0.083]
+
+calib_zlambda_minlambda: 3.0
+# Spec-seeded calibration clusters are sparse at z>1.4; 0.1 nodes leave the top bin empty
+calib_zlambda_nodesize: 0.2
+calib_zlambda_slope_nodesize: 0.2
+
+# Colour chi^2 caps, scaled to the number of colours (9 here; 5-colour LSST-only uses 25). chisq_max also
+# sets the background chi^2 grid and the seed / galaxy cuts; redmagic_calib_chisqcut is redMaGiC's cut.
+# redmapper's default for both is 20.
+chisq_max: 33.0
+redmagic_calib_chisqcut: 33.0
+
+# Cluster pass: in single-pixel runs only run zred seeds within 3 border radii of the pixel, with the radius
+# at each seed's own redshift (default 0 = off: the border is computed at zrange[0] for every seed, which at
+# z>0.8 made ~89% of first-pass seeds lie outside the pixel).
+firstpass_seed_border_scale: 3.0

@@ -1,0 +1,54 @@
+# Example RedmapperRoman config override: LSST-only (bands u,g,r,i,z,y; 5 colours: u-g, g-r, r-i, i-z, z-y),
+# tuned on the Cardinal mock. Used for the v6 test run (RUNS/v6/LSST_ugrizy_chi25).
+#
+# Run with (paths for this project; adapt to yours):
+#   cd RedmapperRoman && python -m RedmapperRoman.Runner \
+#     --outdir <run dir> --SPmap_path <run dir>/MAP --n_jobs 16 \
+#     --bands u,g,r,i,z,y --survey lsst --refband z --z_range 0.1,0.8 --calib_frac 1.0 \
+#     --color_presel_thresh 0.2,0.2,0.2,0.2,0.2 \
+#     --mstar_file <RedmapperRoman>/calibdata/mstar/mstar_lsst_Cardinal_z03.fit \
+#     --input_catalog_hdf5 ... --input_specz ... --fracdet_map ... --foreground_map ... \
+#     --config_override <this file>
+# --SPmap_path is a filename prefix: the Runner reads <prefix>_<band>_<sys>.hpy (sys = maglim, fwhm, airmass,
+# exptime, skybrite) and copies them next to the run's outputs; with <run dir>/MAP the files (or symlinks)
+# MAP_<band>_<sys>.hpy sit directly in the run dir.
+# Band indices come from --bands (no --bands_inds); --color_presel_maxerr defaults to 0.1.
+#
+# Cardinal-specific values: calib_covmat_corr, calib_colormem_sigint and the m* file. Re-measure them for
+# other data. vlim_depthfiles must point at the run's own depth files: change the paths for another run.
+
+# Redshift spline node spacing for red-sequence pivot magnitude
+calib_pivotmag_nodesize: 0.1
+# Node spacings for each colour / slope (arrays of length nmag - 1)
+calib_color_nodesizes: [0.05, 0.05, 0.05, 0.05, 0.05]
+calib_slope_nodesizes: [0.1, 0.1, 0.1, 0.1, 0.1]
+# u is shallow: only use u-g in detail at low redshift (SDSS-style)
+calib_color_maxnodes: [0.4, -1, -1, -1, -1]
+calib_covmat_maxnodes: [0.4, -1, -1, -1, -1]
+calib_covmat_nodesize: 0.25
+# Intrinsic correlation of red-sequence colour offsets, measured from Cardinal true cluster members.
+# Use either this full matrix or calib_covmat_constant (one value for all pairs), not both.
+# Order: u-g, g-r, r-i, i-z, z-y
+calib_covmat_corr: [[1.000, 0.819, 0.684, 0.456, 0.740],
+                    [0.819, 1.000, 0.911, 0.777, 0.642],
+                    [0.684, 0.911, 1.000, 0.863, 0.731],
+                    [0.456, 0.777, 0.863, 1.000, 0.657],
+                    [0.740, 0.642, 0.731, 0.657, 1.000]]
+# Width-fit window in units of the training members' spread (default 1.5). The red sequence has a red
+# tail, which a 1.5 sigma window truncates into a too-narrow intrinsic scatter.
+calib_color_nsig: 3.0
+
+# Zeroth-iteration colour training: the colour straddling the 4000A break in each redshift range
+#  z<0.35: g-r (index 1), 0.35<z<0.72: r-i (index 2), z>0.72: i-z (index 3)
+calib_colormem_colormodes: [1, 2, 3]
+calib_colormem_zbounds: [0.35, 0.72]
+# Scatter of each of those colours over its redshift range (Cardinal)
+calib_colormem_sigint: [0.055, 0.067, 0.154]
+
+calib_zlambda_minlambda: 3.0
+
+# Colour chi^2 caps, scaled to the number of colours (5 here; 9-colour LSST+Roman uses 33). chisq_max also
+# sets the background chi^2 grid and the seed / galaxy cuts; redmagic_calib_chisqcut is redMaGiC's cut.
+# redmapper's default for both is 20.
+chisq_max: 25.0
+redmagic_calib_chisqcut: 25.0
